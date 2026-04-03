@@ -298,6 +298,33 @@ module DiscordBot {
             return filename.trim()
         }
 
+        public filterSearchInput(str) {
+            let directories = str.split('/')
+            // Remove season patterns from each directory part and filter out complex directories
+            let cleanedDirs = directories
+                .map(dir => {
+                    // Remove patterns like "Season X", "Saison X", "S01", etc.
+                    return dir
+                        .replace(/\b(Season|Saison)\s+\d+/gi, '')
+                        .replace(/\bS\d{1,2}\b/gi, '')
+                        .trim()
+                })
+                .filter(dir => {
+                    // Filter out empty strings
+                    if (dir.length === 0) return false;
+                    
+                    // Ignore directories containing file/codec/quality related patterns
+                    const filePatternsRegex = /\b(x264|x265|h\.?264|h\.?265|hevc|avc|1080p|720p|480p|360p|bluray|web-?dl|webrip|hdtv|dvdrip|dts|aac|mp3|flac|opus|10bit|8bit)\b/gi;
+                    if (filePatternsRegex.test(dir)) return false;
+                    
+                    return true;
+                })
+            if (cleanedDirs.length === 0) {
+                return directories.join(' ').trim();
+            }
+            return cleanedDirs.join(' ').trim()
+        }
+
         public async buildNotifContent(basedir, subdir, filename, hash) : Promise<any> {
             let notif = new Discord.EmbedBuilder();
             notif.setColor('#0099ff')
@@ -316,7 +343,7 @@ module DiscordBot {
             }
 
 
-            let imdbData = await this.getImdbData(subdir.split('/').join(' '))
+            let imdbData = await this.getImdbData(this.filterSearchInput(subdir))
             Logger.debug("IMDB Data", imdbData)
             if (imdbData && imdbData.rating) {
                 if(imdbData.rating.aggregateRating)
@@ -398,7 +425,6 @@ module DiscordBot {
 
         public getBestMatchingShow(titles, originalSearch)
         {
-            let bestIndex = 0;
             let bestNbMatchingWords = 0;
             let originalSearchWords = originalSearch.split(" ");
             originalSearchWords = originalSearchWords.map((e) => {
@@ -406,6 +432,7 @@ module DiscordBot {
                 return e;
             });
             console.log("original search words:", originalSearchWords)
+            let bestTitles = []
             for(let i=0; i<titles.length; ++i)
             {
                 let currentTitle = titles[i];
@@ -422,17 +449,41 @@ module DiscordBot {
                 console.log("Matching words:", nbMatchingWords);
                 if(nbMatchingWords > bestNbMatchingWords)
                 {
+                    bestTitles = [currentTitle];
                     bestNbMatchingWords = nbMatchingWords;
-                    bestIndex = i;
+                }
+                else if(nbMatchingWords == bestNbMatchingWords)
+                {
+                    bestTitles.push(currentTitle);
                 }
             }
-            return titles[bestIndex];
+            console.log("Best matching titles:", bestTitles);
+            // Remove titles with very low rating (less than 3/10), or low vote count (less than 500 votes)
+            bestTitles = bestTitles.filter((title) => {
+                if (title.rating) {
+                    if (title?.rating?.aggregateRating && title.rating.aggregateRating < 3) {
+                        return false;
+                    }
+                    if (title?.rating?.voteCount && title.rating.voteCount < 500) {
+                        return false;
+                    }
+                }
+                return true;
+            })
+            console.log("Best matching titles after filtering low ratings/votes:", bestTitles);
+            // No best title found, just return the first result from the unfiltered list
+            if (bestTitles.length == 0) {
+                return titles[0];
+            }
+            return bestTitles[0];
         }
 
         public async getImdbData(search:string)
         {
+            console.log("Getting IMDB data for search:", search)
             try {
                 if (_cacheImdbData[search]) {
+                    console.log("Returning cached IMDB data for search:", search)
                     return _cacheImdbData[search]
                 }
                 let reply = await this.callApi(`https://api.imdbapi.dev/search/titles?query=${encodeURIComponent(search)}`, null, "GET", "");
@@ -443,7 +494,11 @@ module DiscordBot {
                 }
                 if(reply.data.titles && reply.data.titles.length > 0)
                 {
-                    return this.getBestMatchingShow(reply.data.titles, search);
+                    let bestMatch = this.getBestMatchingShow(reply.data.titles, search);
+                    // Cache the result to avoid future API calls for the same search
+                    _cacheImdbData[search] = bestMatch;
+                    Logger.debug("Cached IMDB data for search:", search)
+                    return bestMatch;
                 }
                 else
                 {
