@@ -372,11 +372,25 @@ module DiscordBot {
                 let episodeURL = `${baseUrl}/${encodeURIComponent(subdir)}/${encodeURIComponent(filename)}`
                 notif.setURL(episodeURL)
                 
+                let sephiImageUrl = ''
+                let isSephiImageUrlValid = false;
+                if (config.get("thumbsUrl")) {
+                    sephiImageUrl = `${config.get("thumbsUrl")}/${encodeURIComponent(subdir.split('/')[0])}.png`
+                    try {
+
+                        let headResponse = await axios.head(sephiImageUrl, { httpsAgent:myHttpsAgent, timeout:5000 })
+                        if (headResponse.status == 200) {
+                            isSephiImageUrlValid = true;
+                        }
+                    } catch(e) {
+                        Logger.warning("Sephi image not found at url", sephiImageUrl)
+                    }
+                }
                 let thumbsUrl = ''
-                if (imdbData && imdbData.primaryImage && imdbData.primaryImage.url) {
+                if (isSephiImageUrlValid) {
+                    thumbsUrl = sephiImageUrl
+                } else if (imdbData && imdbData.primaryImage && imdbData.primaryImage.url) {
                     thumbsUrl = imdbData.primaryImage.url
-                } else if (config.has("thumbsUrl")) {
-                    thumbsUrl = `${config.get("thumbsUrl")}/${encodeURIComponent(subdir.split('/')[0])}.png`
                 }
                 if (thumbsUrl) {
                     notif.setImage(thumbsUrl)
